@@ -318,13 +318,25 @@
     }
 
     // Interaction
+    let hasDragged = false;
+
     canvas.addEventListener('mousedown', e => {
       isDragging = true;
+      hasDragged = false;
       dragStart = { x: e.clientX - transform.x, y: e.clientY - transform.y };
     });
+
+    canvas.addEventListener('touchstart', e => {
+      if (e.touches.length === 1) {
+        isDragging = true;
+        hasDragged = false;
+        dragStart = { x: e.touches[0].clientX - transform.x, y: e.touches[0].clientY - transform.y };
+      }
+    }, { passive: false });
     
     window.addEventListener('mousemove', e => {
       if (isDragging) {
+        hasDragged = true;
         transform.x = e.clientX - dragStart.x;
         transform.y = e.clientY - dragStart.y;
         draw();
@@ -359,8 +371,21 @@
         }
       }
     });
+
+    window.addEventListener('touchmove', e => {
+      if (isDragging && e.touches.length === 1) {
+        hasDragged = true;
+        // Prevent default scrolling only if we are actively dragging
+        if (e.cancelable) e.preventDefault();
+        transform.x = e.touches[0].clientX - dragStart.x;
+        transform.y = e.touches[0].clientY - dragStart.y;
+        draw();
+      }
+    }, { passive: false });
     
     window.addEventListener('mouseup', () => { isDragging = false; });
+    window.addEventListener('touchend', () => { isDragging = false; });
+    window.addEventListener('touchcancel', () => { isDragging = false; });
     
     canvas.addEventListener('wheel', e => {
       e.preventDefault();
@@ -381,7 +406,7 @@
 
     // Click node to focus
     canvas.addEventListener('click', e => {
-      if (isDragging) return; // ignore drag clicks
+      if (hasDragged) return; // ignore drag clicks
       
       const rect = canvas.getBoundingClientRect();
       const mx = (e.clientX - rect.left - transform.x) / transform.scale;

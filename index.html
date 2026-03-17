@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pal combinations - Full Canvas</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+
+    :root {
+      --bg: #0d0f1a;
+      --surface: #151929;
+      --surface2: #1d2235;
+      --border: #2a3050;
+      --accent: #6c63ff;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      z-index: 10;
+    }
+
+    .search-wrap {
+      flex: 1;
+      display: flex;
+      gap: 8px;
+    }
+
+    .search-wrap input {
+      width: 250px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 8px;
+      outline: none;
+    }
+
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    /* Full screen canvas container */
+    #canvas-container {
+      flex: 1;
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: grab;
+    }
+    
+    canvas:active {
+      cursor: grabbing;
+    }
+    
+    #tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: var(--surface2);
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      padding: 10px;
+      display: none;
+      font-size: 0.85rem;
+      z-index: 100;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div>🐾 Pal Canvas Map</div>
+    <div class="search-wrap">
+      <input id="search" type="text" placeholder="Search a Pal..." autocomplete="off">
+      <button id="btn-search">Search</button>
+    </div>
+    <div id="stats" style="color:var(--text-muted); font-size: 14px;"></div>
+  </header>
+
+  <div id="canvas-container">
+    <canvas id="view"></canvas>
+    <div id="tooltip"></div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('view');
+    const ctx = canvas.getContext('2d');
+    const tooltip = document.getElementById('tooltip');
+    
+    let palsMap = {};
+    let combinations = [];
+    let nodes = [];
+    let links = [];
+    
+    // Viewport transform
+    let transform = { x: 0, y: 0, scale: 1 };
+    let isDragging = false;
+    let dragStart = { x: 0, y: 0 };
+    
+    function resize() {
+      canvas.width = canvas.parentElement.clientWidth;
+      canvas.height = canvas.parentElement.clientHeight;
+      draw();
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Fetch data
+    fetch('./192.json').then(r => r.json()).then(data => {
+      data.palArraySchema.pals.forEach(p => {
+        palsMap[p.name] = p;
+        if (p.imageUrl) {
+          const img = new Image();
+          img.src = p.imageUrl;
+          img.onload = () => draw();
+          p.imgObj = img;
+        }
+      });
+      combinations = data.combinationArraySchema.combinations;
+      document.getElementById('stats').innerText = `${combinations.length} combos loaded`;
+      buildGraph();
+    }).catch(err => {
+      console.error(err);
+      document.getElementById('stats').innerText = "Error loading 192.json";
+    });
+
+    function buildGraph(focusPal = null) {
+      nodes = [];
+      links = [];
+      const NODE_W = 140;
+      const NODE_H = 40;
+      const V_GAP = 60;
+      const H_GAP = 200;
+
+      let filtered = combinations;
+      if (focusPal) {
+        filtered = combinations.filter(c => 
+          c.childName.toLowerCase() === focusPal.toLowerCase() ||
+          c.parent1Name.toLowerCase() === focusPal.toLowerCase() ||
+          c.parent2Name.toLowerCase() === focusPal.toLowerCase()
+        ).slice(0, 100); // cap to 100 for performance
+      } else {
+        filtered = combinations.slice(0, 500); // just show a generic subset if no focus
+      }
+      
+      // Basic layout algorithm (very simplified for demo)
+      // For a real app, a force-directed graph or hierarchical layout is needed.
+      // We will just scatter them randomly if no focus, or tree layout if focus.
+      
+      if (!focusPal) {
+        // Random spread
+        const palSet = new Set();
+        filtered.forEach(c => { palSet.add(c.childName); palSet.add(c.parent1Name); palSet.add(c.parent2Name); });
+        
+        let i = 0;
+        const radius = Math.sqrt(palSet.size) * 60;
+        for (let p of palSet) {
+          const angle = (i / palSet.size) * Math.PI * 2;
+          const r = Math.random() * radius;
+          nodes.push({ id: p, label: p, x: Math.cos(angle) * r, y: Math.sin(angle) * r, imageUrl: palsMap[p]?.imageUrl });
+          i++;
+        }
+        
+        filtered.forEach(c => {
+          links.push({ source: c.parent1Name, target: c.childName });
+          links.push({ source: c.parent2Name, target: c.childName });
+        });
+        
+      } else {
+        // Star layout around focus Pal
+        nodes.push({ id: focusPal, label: focusPal, x: 0, y: 0, isFocus: true, imageUrl: palsMap[focusPal]?.imageUrl });
+        
+        let asChild = filtered.filter(c => c.childName.toLowerCase() === focusPal.toLowerCase());
+        let asParent = filtered.filter(c => c.parent1Name.toLowerCase() === focusPal.toLowerCase() || c.parent2Name.toLowerCase() === focusPal.toLowerCase()).slice(0, 2);
+        
+        // Left side: parents creating focus
+        asChild.forEach((c, idx) => {
+          const y = (idx - asChild.length / 2) * (NODE_H + V_GAP);
+          const jointId = `joint_${idx}`;
+          nodes.push({ id: jointId, label: '', x: -H_GAP * 0.6, y: y, isJoint: true });
+          nodes.push({ id: `p1_${idx}`, label: c.parent1Name, x: -H_GAP * 1.5, y: y - 25, imageUrl: palsMap[c.parent1Name]?.imageUrl });
+          nodes.push({ id: `p2_${idx}`, label: c.parent2Name, x: -H_GAP * 1.5, y: y + 25, imageUrl: palsMap[c.parent2Name]?.imageUrl });
+          
+          links.push({ source: `p1_${idx}`, target: jointId });
+          links.push({ source: `p2_${idx}`, target: jointId });
+          links.push({ source: jointId, target: focusPal });
+        });
+        
+        // Right side: focus + partner creating child
+        asParent.forEach((c, idx) => {
+          const y = (idx - asParent.length / 2) * (NODE_H + V_GAP);
+          const partnerName = c.parent1Name.toLowerCase() === focusPal.toLowerCase() ? c.parent2Name : c.parent1Name;
+          
+          nodes.push({ id: `partner_${idx}`, label: partnerName, x: H_GAP / 2, y: y, imageUrl: palsMap[partnerName]?.imageUrl });
+          nodes.push({ id: `child_${idx}`, label: c.childName, x: H_GAP * 1.5, y: y, imageUrl: palsMap[c.childName]?.imageUrl });
+          
+          links.push({ source: focusPal, target: `child_${idx}` });
+          links.push({ source: `partner_${idx}`, target: `child_${idx}` });
+        });
+      }
+
+      // Reset transform
+      transform = { x: canvas.width / 2, y: canvas.height / 2, scale: 1 };
+      draw();
+    }
+
+    document.getElementById('btn-search').addEventListener('click', () => {
+      const q = document.getElementById('search').value;
+      buildGraph(q || null);
+    });
+
+    // Drawing
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      ctx.save();
+      ctx.translate(transform.x, transform.y);
+      ctx.scale(transform.scale, transform.scale);
+      
+      const NODE_W = 120;
+      const NODE_H = 34;
+
+      // Draw links
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#43e97b';
+      ctx.fillStyle = '#43e97b';
+      
+      links.forEach(link => {
+        const sourceNode = nodes.find(n => n.id === link.source);
+        const targetNode = nodes.find(n => n.id === link.target);
+        if (sourceNode && targetNode) {
+          ctx.beginPath();
+          ctx.moveTo(sourceNode.x, sourceNode.y);
+          // bezier curve
+          const mx = (sourceNode.x + targetNode.x) / 2;
+          ctx.bezierCurveTo(mx, sourceNode.y, mx, targetNode.y, targetNode.x, targetNode.y);
+          ctx.stroke();
+        }
+      });
+      
+      // Draw nodes
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '12px Outfit';
+      
+      nodes.forEach(node => {
+        if (node.isJoint) {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, 4, 0, Math.PI * 2);
+          ctx.fillStyle = '#43e97b';
+          ctx.fill();
+          return;
+        }
+
+        ctx.fillStyle = node.isFocus ? '#1e1a10' : '#1d2235';
+        ctx.strokeStyle = node.isFocus ? '#f6a623' : '#2a3050';
+        ctx.lineWidth = node.isFocus ? 2 : 1;
+        
+        // draw rounded rect
+        ctx.beginPath();
+        const r = 8;
+        const x = node.x - NODE_W/2;
+        const y = node.y - NODE_H/2;
+        ctx.roundRect(x, y, NODE_W, NODE_H, r);
+        ctx.fill();
+        ctx.stroke();
+        
+        ctx.fillStyle = '#e2e8f0';
+        let displayLabel = node.label.length > 14 ? node.label.substring(0, 13) + '…' : node.label;
+        
+        let p = palsMap[node.label];
+        if (p && p.imgObj && p.imgObj.complete) {
+          const imgSize = 24;
+          const padding = 8;
+          ctx.drawImage(p.imgObj, node.x - NODE_W/2 + padding, node.y - imgSize/2, imgSize, imgSize);
+          ctx.textAlign = 'left';
+          ctx.fillText(displayLabel, node.x - NODE_W/2 + padding + imgSize + padding, node.y);
+        } else {
+          ctx.textAlign = 'center';
+          ctx.fillText(displayLabel, node.x, node.y);
+        }
+      });
+      
+      ctx.restore();
+    }
+
+    // Interaction
+    canvas.addEventListener('mousedown', e => {
+      isDragging = true;
+      dragStart = { x: e.clientX - transform.x, y: e.clientY - transform.y };
+    });
+    
+    window.addEventListener('mousemove', e => {
+      if (isDragging) {
+        transform.x = e.clientX - dragStart.x;
+        transform.y = e.clientY - dragStart.y;
+        draw();
+      } else {
+        // Check hover for tooltip
+        const rect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left - transform.x) / transform.scale;
+        const my = (e.clientY - rect.top - transform.y) / transform.scale;
+        
+        const NODE_W = 120, NODE_H = 34;
+        let hovered = nodes.find(n => 
+          !n.isJoint &&
+          mx >= n.x - NODE_W/2 && mx <= n.x + NODE_W/2 &&
+          my >= n.y - NODE_H/2 && my <= n.y + NODE_H/2
+        );
+        
+        if (hovered) {
+          tooltip.style.display = 'block';
+          tooltip.style.left = (e.clientX + 15) + 'px';
+          tooltip.style.top = (e.clientY + 15) + 'px';
+          
+          let p = palsMap[hovered.label];
+          let imgHtml = '';
+          if (p && p.imageUrl) {
+            imgHtml = `<img src="${p.imageUrl}" style="width: 48px; height: 48px; display: block; margin: 0 auto 5px;" />`;
+          }
+          tooltip.innerHTML = `${imgHtml}<div style="text-align:center;"><strong>${hovered.label}</strong><br>Click to focus</div>`;
+          canvas.style.cursor = 'pointer';
+        } else {
+          tooltip.style.display = 'none';
+          canvas.style.cursor = 'grab';
+        }
+      }
+    });
+    
+    window.addEventListener('mouseup', () => { isDragging = false; });
+    
+    canvas.addEventListener('wheel', e => {
+      e.preventDefault();
+      const zoomIntensity = 0.1;
+      const wheel = e.deltaY < 0 ? 1 : -1;
+      const zoom = Math.exp(wheel * zoomIntensity);
+      
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      
+      transform.x = mouseX - (mouseX - transform.x) * zoom;
+      transform.y = mouseY - (mouseY - transform.y) * zoom;
+      transform.scale *= zoom;
+      
+      draw();
+    }, { passive: false });
+
+    // Click node to focus
+    canvas.addEventListener('click', e => {
+      if (isDragging) return; // ignore drag clicks
+      
+      const rect = canvas.getBoundingClientRect();
+      const mx = (e.clientX - rect.left - transform.x) / transform.scale;
+      const my = (e.clientY - rect.top - transform.y) / transform.scale;
+      
+      const NODE_W = 120, NODE_H = 34;
+      let clicked = nodes.find(n => 
+        !n.isJoint &&
+        mx >= n.x - NODE_W/2 && mx <= n.x + NODE_W/2 &&
+        my >= n.y - NODE_H/2 && my <= n.y + NODE_H/2
+      );
+      
+      if (clicked) {
+        document.getElementById('search').value = clicked.label;
+        buildGraph(clicked.label);
+      }
+    });
+    
+  </script>
+</body>
+</html>

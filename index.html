@@ -66,6 +66,29 @@
       font-family: inherit;
     }
 
+    .toggle-group {
+      display: flex;
+      background: var(--surface2);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .toggle-btn {
+      background: transparent;
+      color: var(--text-muted);
+      border: none;
+      padding: 8px 16px;
+      cursor: pointer;
+      border-radius: 0;
+      transition: 0.2s;
+    }
+
+    .toggle-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
     /* Full screen canvas container */
     #canvas-container {
       flex: 1;
@@ -107,6 +130,11 @@
     <div class="search-wrap">
       <input id="search" type="text" placeholder="Search a Pal..." autocomplete="off">
       <button id="btn-search">Search</button>
+      <div class="toggle-group" id="type-toggle">
+        <button class="toggle-btn active" data-type="both">Both</button>
+        <button class="toggle-btn" data-type="parent">Parent Type</button>
+        <button class="toggle-btn" data-type="child">Child Type</button>
+      </div>
     </div>
     <div id="stats" style="color:var(--text-muted); font-size: 14px;"></div>
   </header>
@@ -125,6 +153,7 @@
     let combinations = [];
     let nodes = [];
     let links = [];
+    let currentRelationType = 'both';
     
     // Viewport transform
     let transform = { x: 0, y: 0, scale: 1 };
@@ -167,21 +196,9 @@
       const H_GAP = 200;
 
       let filtered = combinations;
-      if (focusPal) {
-        filtered = combinations.filter(c => 
-          c.childName.toLowerCase() === focusPal.toLowerCase() ||
-          c.parent1Name.toLowerCase() === focusPal.toLowerCase() ||
-          c.parent2Name.toLowerCase() === focusPal.toLowerCase()
-        ).slice(0, 100); // cap to 100 for performance
-      } else {
-        filtered = combinations.slice(0, 500); // just show a generic subset if no focus
-      }
-      
-      // Basic layout algorithm (very simplified for demo)
-      // For a real app, a force-directed graph or hierarchical layout is needed.
-      // We will just scatter them randomly if no focus, or tree layout if focus.
       
       if (!focusPal) {
+        filtered = combinations.slice(0, 500); // just show a generic subset if no focus
         // Random spread
         const palSet = new Set();
         filtered.forEach(c => { palSet.add(c.childName); palSet.add(c.parent1Name); palSet.add(c.parent2Name); });
@@ -204,12 +221,20 @@
         // Star layout around focus Pal
         nodes.push({ id: focusPal, label: focusPal, x: 0, y: 0, isFocus: true, imageUrl: palsMap[focusPal]?.imageUrl });
         
-        let asChild = filtered.filter(c => c.childName.toLowerCase() === focusPal.toLowerCase());
-        let asParent = filtered.filter(c => c.parent1Name.toLowerCase() === focusPal.toLowerCase() || c.parent2Name.toLowerCase() === focusPal.toLowerCase()).slice(0, 2);
+        let asChild = [];
+        let asParent = [];
+        
+        if (currentRelationType === 'both' || currentRelationType === 'child') {
+          asChild = combinations.filter(c => c.childName.toLowerCase() === focusPal.toLowerCase());
+        }
+        
+        if (currentRelationType === 'both' || currentRelationType === 'parent') {
+          asParent = combinations.filter(c => c.parent1Name.toLowerCase() === focusPal.toLowerCase() || c.parent2Name.toLowerCase() === focusPal.toLowerCase());
+        }
         
         // Left side: parents creating focus
         asChild.forEach((c, idx) => {
-          const y = (idx - asChild.length / 2) * (NODE_H + V_GAP);
+          const y = (idx - (asChild.length - 1) / 2) * (NODE_H + V_GAP);
           const jointId = `joint_${idx}`;
           nodes.push({ id: jointId, label: '', x: -H_GAP * 0.6, y: y, isJoint: true });
           nodes.push({ id: `p1_${idx}`, label: c.parent1Name, x: -H_GAP * 1.5, y: y - 25, imageUrl: palsMap[c.parent1Name]?.imageUrl });
@@ -222,7 +247,7 @@
         
         // Right side: focus + partner creating child
         asParent.forEach((c, idx) => {
-          const y = (idx - asParent.length / 2) * (NODE_H + V_GAP);
+          const y = (idx - (asParent.length - 1) / 2) * (NODE_H + V_GAP);
           const partnerName = c.parent1Name.toLowerCase() === focusPal.toLowerCase() ? c.parent2Name : c.parent1Name;
           
           nodes.push({ id: `partner_${idx}`, label: partnerName, x: H_GAP / 2, y: y, imageUrl: palsMap[partnerName]?.imageUrl });
@@ -241,6 +266,25 @@
     document.getElementById('btn-search').addEventListener('click', () => {
       const q = document.getElementById('search').value;
       buildGraph(q || null);
+    });
+
+    document.querySelectorAll('.toggle-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        currentRelationType = e.target.getAttribute('data-type');
+        
+        const q = document.getElementById('search').value;
+        const focusNode = nodes.find(n => n.isFocus);
+        
+        if (q) {
+          buildGraph(q);
+        } else if (focusNode) {
+          buildGraph(focusNode.label);
+        } else {
+          buildGraph(null);
+        }
+      });
     });
 
     // Drawing
